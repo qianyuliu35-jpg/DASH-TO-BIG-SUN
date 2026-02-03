@@ -1,0 +1,305 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>合成戴煬煬 (Mobile + PC)</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #f7f7f7;
+            font-family: Arial, sans-serif;
+            padding-top: 20px;
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #ff5252;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        #score {
+            font-size: 20px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        /* 游戏区域自适应屏幕宽度，最大不超过 420px */
+        #game {
+            width: 90vw;
+            max-width: 420px;
+            height: calc(90vw * 1.6);
+            max-height: 650px;
+            border: 3px solid #333;
+            background: #fff8e1;
+            position: relative;
+            overflow: hidden;
+            touch-action: none; /* 防止手机默认滑动页面 */
+        }
+
+        .fruit {
+            position: absolute;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        #control-panel {
+            margin-top: 15px;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 18px;
+            width: 90vw;
+            max-width: 420px;
+        }
+
+        #force-slider {
+            flex: 1;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>合成戴煬煬</h1>
+    <p>Provided by DAZI</p>
+    <hr style="width:90vw; max-width:420px; margin:10px 0;" />
+
+    <div id="score">分数：0</div>
+
+    <!-- 游戏区 -->
+    <div id="game"></div>
+
+    <!-- 调节条 -->
+    <div id="control-panel">
+        <label for="force-slider">碰撞力度:</label>
+        <input type="range" id="force-slider" min="0.01" max="0.2" value="0.1" step="0.01">
+        <span id="force-value">0.10</span>
+    </div>
+
+    <script>
+        const game = document.getElementById('game');
+        const scoreEl = document.getElementById('score');
+        let WIDTH = game.clientWidth;
+        let HEIGHT = game.clientHeight;
+
+        const GRAVITY = 0.5;
+        const FRICTION = 0.9;
+        const MAX_LEVEL = 10;
+
+        let score = 0;
+        let fruits = [];
+        let currentFruit = null;
+        let canDrop = true;
+
+        let collisionForce = 0.1;
+
+        const slider = document.getElementById('force-slider');
+        const forceValue = document.getElementById('force-value');
+        slider.addEventListener('input', (e) => {
+            collisionForce = parseFloat(e.target.value);
+            forceValue.textContent = collisionForce.toFixed(2);
+        });
+
+        const fruitData = [
+            { r: 12, img: 'hxy2.jpg', score: 10 },
+            { r: 16, img: 'cym2.jpg', score: 20 },
+            { r: 22, img: 'lx2.JPG', score: 30 },
+            { r: 28, img: 'lqy2.jpg', score: 50 },
+            { r: 36, img: 'yy.jpg', score: 80 },
+            { r: 44, img: 'hxy.JPG', score: 120 },
+            { r: 54, img: 'cym.jpg', score: 180 },
+            { r: 66, img: 'lx.JPG', score: 250 },
+            { r: 78, img: 'lqy.JPG', score: 350 },
+            { r: 94, img: 'yy2.jpg', score: 500 },
+            { r: 110, img: 'dy.jpg', score: 800 }
+        ];
+
+        function createCurrentFruit() {
+            const level = Math.floor(Math.random() * 4);
+            const data = fruitData[level];
+
+            const div = document.createElement('div');
+            div.className = 'fruit';
+            div.style.width = data.r * 2 + 'px';
+            div.style.height = data.r * 2 + 'px';
+            div.style.backgroundImage = `url(${data.img})`;
+            div.style.left = WIDTH / 2 + 'px';
+            div.style.top = '40px';
+
+            game.appendChild(div);
+
+            currentFruit = {
+                el: div,
+                x: WIDTH / 2,
+                y: 40,
+                vx: 0,
+                vy: 0,
+                r: data.r,
+                level: level,
+                isCurrent: true
+            };
+        }
+
+        /* ---------- 电脑拖动 ---------- */
+        game.addEventListener('mousemove', (e) => {
+            if (!currentFruit || !canDrop) return;
+            const rect = game.getBoundingClientRect();
+            let x = e.clientX - rect.left;
+            x = Math.max(currentFruit.r, Math.min(WIDTH - currentFruit.r, x));
+            currentFruit.x = x;
+            currentFruit.el.style.left = x + 'px';
+        });
+
+        /* ---------- 触屏拖动 ---------- */
+        game.addEventListener('touchmove', (e) => {
+            if (!currentFruit || !canDrop) return;
+            const rect = game.getBoundingClientRect();
+            let x = e.touches[0].clientX - rect.left;
+            x = Math.max(currentFruit.r, Math.min(WIDTH - currentFruit.r, x));
+            currentFruit.x = x;
+            currentFruit.el.style.left = x + 'px';
+        });
+
+        /* ---------- PC 点击掉落 ---------- */
+        game.addEventListener('click', dropFruit);
+
+        /* ---------- 手机松手掉落 ---------- */
+        game.addEventListener('touchend', (e) => {
+            dropFruit();
+        });
+
+        function dropFruit() {
+            if (!canDrop || !currentFruit) return;
+
+            canDrop = false;
+            currentFruit.isCurrent = false;
+            fruits.push(currentFruit);
+            currentFruit = null;
+
+            setTimeout(() => {
+                createCurrentFruit();
+                canDrop = true;
+            }, 300);
+        }
+
+        /* ---------- 物理循环 ---------- */
+        function loop() {
+            WIDTH = game.clientWidth;
+            HEIGHT = game.clientHeight;
+
+            for (let i = 0; i < fruits.length; i++) {
+                const f = fruits[i];
+
+                if (f.y > HEIGHT - f.r) {
+                    f.y = HEIGHT - f.r;
+                    f.vy *= -0.4;
+                } else {
+                    f.vy += GRAVITY;
+                }
+
+                f.vx *= FRICTION;
+                f.vy *= FRICTION;
+
+                f.x += f.vx;
+                f.y += f.vy;
+
+                if (f.x < f.r) {
+                    f.x = f.r;
+                    f.vx *= -0.6;
+                }
+                if (f.x > WIDTH - f.r) {
+                    f.x = WIDTH - f.r;
+                    f.vx *= -0.6;
+                }
+
+                for (let j = i + 1; j < fruits.length; j++) {
+                    const f2 = fruits[j];
+                    const dx = f.x - f2.x;
+                    const dy = f.y - f2.y;
+                    const dist = Math.hypot(dx, dy);
+                    const minDist = f.r + f2.r;
+
+                    if (dist < minDist) {
+
+                        if (f.level === f2.level && f.level < MAX_LEVEL) {
+                            const newLevel = f.level + 1;
+                            const newData = fruitData[newLevel];
+
+                            if (newLevel === MAX_LEVEL) {
+                                alert("🎉 恭喜达成挑战！成功合成戴煬煬！");
+                            }
+
+                            const newF = {
+                                el: document.createElement('div'),
+                                x: (f.x + f2.x) / 2,
+                                y: (f.y + f2.y) / 2,
+                                vx: (f.vx + f2.vx) / 2,
+                                vy: (f.vy + f2.vy) / 2,
+                                r: newData.r,
+                                level: newLevel
+                            };
+
+                            newF.el.className = 'fruit';
+                            newF.el.style.width = newData.r * 2 + 'px';
+                            newF.el.style.height = newData.r * 2 + 'px';
+                            newF.el.style.backgroundImage = `url(${newData.img})`;
+
+                            game.appendChild(newF.el);
+                            fruits.push(newF);
+
+                            game.removeChild(f.el);
+                            game.removeChild(f2.el);
+
+                            fruits.splice(j, 1);
+                            fruits.splice(i, 1);
+
+                            i--;
+
+                            score += newData.score;
+                            scoreEl.textContent = `分数：${score}`;
+                            break;
+                        }
+
+                        const angle = Math.atan2(dy, dx);
+                        const tx = f2.x + Math.cos(angle) * minDist;
+                        const ty = f2.y + Math.sin(angle) * minDist;
+                        const ax = (tx - f.x) * collisionForce;
+                        const ay = (ty - f.y) * collisionForce;
+
+                        f.vx += ax;
+                        f.vy += ay;
+                        f2.vx -= ax;
+                        f2.vy -= ay;
+                    }
+                }
+
+                f.el.style.left = f.x + 'px';
+                f.el.style.top = f.y + 'px';
+            }
+
+            requestAnimationFrame(loop);
+        }
+
+        createCurrentFruit();
+        loop();
+    </script>
+
+</body>
+</html>
+
